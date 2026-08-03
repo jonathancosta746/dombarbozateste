@@ -1,0 +1,58 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && get(/databases/$(database)/documents/barbers/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    function isOwner(barberId) {
+      return signedIn() && request.auth.uid == barberId;
+    }
+
+    match /barbers/{barberId} {
+      allow read: if true;
+      allow create: if isAdmin();
+      allow update: if isAdmin() || isOwner(barberId);
+      allow delete: if isAdmin() && !isOwner(barberId);
+    }
+
+    match /services/{serviceId} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.barberId == request.auth.uid;
+      allow update, delete: if signedIn()
+        && resource.data.barberId == request.auth.uid;
+    }
+
+    match /appointments/{appointmentId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
+      allow delete: if signedIn()
+        && (isAdmin() || resource.data.barberId == request.auth.uid);
+    }
+
+    match /dayBlocks/{blockId} {
+      allow read: if true;
+      allow create, update: if signedIn()
+        && request.resource.data.barberId == request.auth.uid;
+      allow delete: if signedIn()
+        && resource.data.barberId == request.auth.uid;
+    }
+
+    match /fitInRequests/{requestId} {
+      allow read: if true;
+      // Qualquer cliente (sem login) pode criar um pedido de encaixe.
+      allow create: if true;
+      // Só o próprio barbeiro ou um admin pode marcar como concluído/remover.
+      allow update, delete: if signedIn()
+        && (isAdmin() || resource.data.barberId == request.auth.uid);
+    }
+  }
+}
