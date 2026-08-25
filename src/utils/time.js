@@ -46,8 +46,10 @@ export function gerarHorariosDisponiveis({ expedienteDia, duracaoServicoMin, age
   const pausaInicio = expedienteDia.breakStart ? horaParaMinutos(expedienteDia.breakStart) : null
   const pausaFim = expedienteDia.breakEnd ? horaParaMinutos(expedienteDia.breakEnd) : null
 
+  // "cancelado" e "remarcado" não ocupam mais o horário: remarcado significa
+  // que o cliente foi movido para outra data, liberando este horário.
   const ocupados = (agendamentosDoDia || [])
-    .filter(a => a.status !== 'cancelado')
+    .filter(a => a.status !== 'cancelado' && a.status !== 'remarcado')
     .map(a => ({ inicio: horaParaMinutos(a.startTime), fim: horaParaMinutos(a.endTime) }))
 
   const agora = new Date()
@@ -71,6 +73,20 @@ export function gerarHorariosDisponiveis({ expedienteDia, duracaoServicoMin, age
   return slots
 }
 
+// Soma minutos a um horário "HH:mm" e devolve o novo horário no mesmo formato.
+export function somarMinutos(hhmm, minutos) {
+  return minutosParaHora(horaParaMinutos(hhmm) + minutos)
+}
+
+// Soma dias a uma dataKey "AAAA-MM-DD" e devolve a nova dataKey.
+// Usado para gerar as próximas datas de um agendamento recorrente semanal.
+export function adicionarDias(dataKey, dias) {
+  const [ano, mes, dia] = dataKey.split('-').map(Number)
+  const d = new Date(ano, mes - 1, dia)
+  d.setDate(d.getDate() + dias)
+  return toDateKey(d)
+}
+
 export function formatarDataLegivel(date) {
   return new Date(date).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })
 }
@@ -79,6 +95,11 @@ export const MOTIVOS_BLOQUEIO_DIA = {
   ferias: 'Férias',
   folga: 'Folga',
   nao_especificado: 'Não especificado'
+}
+
+export function diaDaSemana(dataKey) {
+  const [ano, mes, dia] = dataKey.split('-').map(Number)
+  return DIAS_SEMANA[new Date(ano, mes - 1, dia).getDay()]
 }
 
 export function formatarDataBR(dataKey) {

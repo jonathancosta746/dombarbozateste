@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { buscarBarbeiroPorId, ouvirServicos, buscarAgendamentosPorBarbeiroEData, criarAgendamento, criarPedidoEncaixe, ouvirBloqueiosDiaPorBarbeiro } from '../../utils/firebaseData'
 import { toDateKey, formatarDataLegivel, formatarPreco, gerarHorariosDisponiveis, DIAS_SEMANA } from '../../utils/time'
+import { useClientePorTelefone } from '../../hooks/useClientePorTelefone'
+import { salvarTelefoneCliente } from '../../utils/clientSession'
 import TopBar from '../../components/TopBar'
 import CalendarioMes from '../../components/CalendarioMes'
 import Loader from '../../components/Loader'
@@ -20,6 +22,7 @@ export default function Booking() {
   const [pedidoEncaixe, setPedidoEncaixe] = useState(false)
   const [nome, setNome] = useState('')
   const [telefone, setTelefone] = useState('')
+  const { buscando: buscandoCliente, naoEncontrado: clienteNaoEncontrado } = useClientePorTelefone(telefone, setNome)
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
   const [agendamentoConfirmado, setAgendamentoConfirmado] = useState(null)
@@ -130,6 +133,7 @@ export default function Booking() {
         clientPhone: telefone.trim()
       }
       await criarAgendamento(dados)
+      salvarTelefoneCliente(telefone)
       setAgendamentoConfirmado(dados)
     } catch (e) {
       setErro('Não foi possível concluir o agendamento. Tente novamente.')
@@ -159,6 +163,7 @@ export default function Booking() {
         clientPhone: telefone.trim()
       }
       await criarPedidoEncaixe(dados)
+      salvarTelefoneCliente(telefone)
       setEncaixeConfirmado(dados)
     } catch (e) {
       setErro('Não foi possível enviar o pedido de encaixe. Tente novamente.')
@@ -315,7 +320,7 @@ export default function Booking() {
             <div className="aviso-recorrente">
               <span className="aviso-icone">✂️</span>
               <span>
-                Quer um corte recorrente (toda semana, a cada 10 ou 15 dias, por exemplo)?
+                Quer um corte recorrente (toda semana, ou a cada 15 dias, por exemplo)?
                 Combine direto com o barbeiro no dia do atendimento para configurar o agendamento recorrente.
               </span>
             </div>
@@ -326,12 +331,23 @@ export default function Booking() {
           <>
             <div className="section-title">4. Seus dados</div>
             <div className="field">
-              <label htmlFor="nome">Nome</label>
-              <input id="nome" value={nome} onChange={e => setNome(e.target.value)} placeholder="Seu nome" />
-            </div>
-            <div className="field">
               <label htmlFor="telefone">Telefone (WhatsApp)</label>
               <input id="telefone" value={telefone} onChange={e => setTelefone(e.target.value)} placeholder="(61) 90000-0000" inputMode="tel" />
+            </div>
+            <div className="field">
+              <label htmlFor="nome">Nome</label>
+              <input
+                id="nome"
+                value={nome}
+                onChange={e => setNome(e.target.value)}
+                placeholder={
+                  buscandoCliente
+                    ? 'Buscando...'
+                    : clienteNaoEncontrado
+                      ? 'Sem cadastro. Qual o seu nome?'
+                      : 'Seu nome'
+                }
+              />
             </div>
 
             {pedidoEncaixe && (

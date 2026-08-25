@@ -50,6 +50,31 @@ function semUndefined(objeto) {
   return Object.fromEntries(Object.entries(objeto).filter(([, valor]) => valor !== undefined))
 }
 
+function normalizarTelefone(telefone) {
+  return (telefone || '').replace(/\D/g, '')
+}
+
+// ---------- Clientes ----------
+// Registro simples de "nome atrelado a um telefone", para autopreencher o
+// nome quando o telefone já é conhecido (tanto no agendamento manual do
+// barbeiro quanto na tela "Meus agendamentos" do cliente).
+export async function buscarClientePorTelefone(telefone) {
+  const id = normalizarTelefone(telefone)
+  if (!id) return null
+  const snapshot = await getDoc(doc(db, 'clients', id))
+  return snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null
+}
+
+export async function salvarCliente(telefone, nome) {
+  const id = normalizarTelefone(telefone)
+  if (!id || !nome?.trim()) return
+  await setDoc(
+    doc(db, 'clients', id),
+    { phone: telefone.trim(), name: nome.trim(), updatedAt: serverTimestamp() },
+    { merge: true }
+  )
+}
+
 // ---------- Barbeiros ----------
 export function ouvirBarbeiros(callback) {
   const consulta = query(collection(db, 'barbers'), orderBy('name'))
@@ -175,15 +200,32 @@ export function ouvirAgendamentosPorData(dateKey, callback) {
 }
 
 export async function criarAgendamento(dados) {
-  return addDoc(collection(db, 'appointments'), {
+  const resultado = await addDoc(collection(db, 'appointments'), {
     status: 'confirmado',
     ...dados,
     createdAt: serverTimestamp()
   })
+  if (dados.clientPhone && dados.clientName) {
+    await salvarCliente(dados.clientPhone, dados.clientName)
+  }
+  return resultado
 }
 
 export async function atualizarStatusAgendamento(id, status) {
   return updateDoc(doc(db, 'appointments', id), { status })
+}
+
+// Cancela um agendamento recorrente e todas as ocorrências futuras da mesma
+// série (mesmo recurringId), a partir da data informada. Usado quando o
+// barbeiro decide encerrar um corte recorrente.
+export async function cancelarSerieRecorrente(recurringId, apartirDeDataKey) {
+  const consulta = query(collection(db, 'appointments'), where('recurringId', '==', recurringId))
+  const snapshot = await getDocs(consulta)
+  const futuros = snapshot.docs.filter(d => {
+    const dados = d.data()
+    return dados.date >= apartirDeDataKey && dados.status !== 'cancelado' && dados.status !== 'remarcado'
+  })
+  await Promise.all(futuros.map(d => updateDoc(d.ref, { status: 'cancelado' })))
 }
 
 // ---------- Pedidos de encaixe ----------
@@ -210,10 +252,30 @@ export async function concluirPedidoEncaixe(id) {
   return updateDoc(doc(db, 'fitInRequests', id), { status: 'concluido' })
 }
 
-export async function reagendarAgendamento(id, { date, startTime, endTime }) {
-  // Reagendar sempre volta o status para "confirmado" (caso estivesse
-  // marcado como concluído por já ter passado do horário antigo).
-  return updateDoc(doc(db, 'appointments', id), { date, startTime, endTime, status: 'confirmado' })
+// Reagendar não move o agendamento original: ele fica marcado como
+// "remarcado" na data/horário antigos (para o barbeiro ver que aquele
+// horário foi liberado e para onde o cliente foi) e um novo agendamento é
+// criado na nova data/horário. Isso deixa o card antigo visível no painel
+// como histórico, em vez de simplesmente sumir do dia original.
+export async function reagendarAgendamento(agendamento, { date, startTime, endTime }) {
+  const { id, createdAt, status, date: dataAntiga, startTime: horaAntiga, endTime: fimAntigo, ...dadosOriginais } = agendamento
+
+  await updateDoc(doc(db, 'appointments', id), {
+    status: 'remarcado',
+    remarcadoPara: { date, startTime, endTime }
+  })
+
+  const novoDoc = await addDoc(collection(db, 'appointments'), {
+    ...dadosOriginais,
+    date,
+    startTime,
+    endTime,
+    status: 'confirmado',
+    remarcadoDe: id,
+    createdAt: serverTimestamp()
+  })
+
+  return { id: novoDoc.id, ...dadosOriginais, date, startTime, endTime, status: 'confirmado' }
 }
 
 export async function removerAgendamento(id) {

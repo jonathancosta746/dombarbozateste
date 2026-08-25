@@ -148,6 +148,12 @@ main {
   opacity: 0.72;
 }
 
+.card-remarcado {
+  border-style: dashed;
+  border-color: var(--text-muted);
+  opacity: 0.8;
+}
+
 .card-encaixe {
   border-color: var(--red);
 }
@@ -254,6 +260,12 @@ main {
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 2px;
+}
+
+.appointment-highlight {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 /* ---------- Cards de barbeiro (proporção 9:16, foto em destaque) ---------- */
@@ -636,6 +648,8 @@ main {
 .badge-concluido { color: var(--green); border-color: var(--green); }
 .badge-cancelado { color: #d99f9f; border-color: var(--red); text-decoration: line-through; }
 .badge-bloqueado { color: var(--text-muted); border-color: var(--border); }
+.badge-recorrente { color: var(--gold); border-color: var(--gold-dim); background: rgba(201, 162, 39, 0.08); }
+.badge-remarcado { color: var(--text-muted); border-color: var(--border); }
 
 /* ---------- Ticket de confirmação ---------- */
 .ticket {

@@ -75,8 +75,8 @@ export default function Reagendamento({ agendamento, onConcluido, onCancelar }) 
         startTime: horarioSelecionado.startTime,
         endTime: horarioSelecionado.endTime
       }
-      await reagendarAgendamento(agendamento.id, novosDados)
-      onConcluido(novosDados)
+      const novoAgendamento = await reagendarAgendamento(agendamento, novosDados)
+      onConcluido(novoAgendamento)
     } catch (e) {
       setErro('Não foi possível reagendar. Tente novamente.')
       setSalvando(false)

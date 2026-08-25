@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   ouvirBarbeiros, ouvirAgendamentosPorBarbeiroEData,
   atualizarStatusAgendamento, criarAgendamento, removerAgendamento,
   ouvirBloqueiosDiaPorBarbeiro, criarBloqueioDia, removerBloqueioDia,
-  ouvirPedidosEncaixePorBarbeiroEData, concluirPedidoEncaixe
+  ouvirPedidosEncaixePorBarbeiroEData, concluirPedidoEncaixe,
+  cancelarSerieRecorrente
 } from '../../utils/firebaseData'
-import { toDateKey, gerarHorariosDisponiveis, formatarPreco, jaPassou, MOTIVOS_BLOQUEIO_DIA } from '../../utils/time'
+import { toDateKey, gerarHorariosDisponiveis, formatarPreco, formatarDataBR, diaDaSemana, jaPassou, MOTIVOS_BLOQUEIO_DIA } from '../../utils/time'
 import { linkWhatsapp } from '../../utils/whatsapp'
 import { useAuth } from '../../context/AuthContext'
 import CalendarioMes from '../../components/CalendarioMes'
 import Reagendamento from '../../components/Reagendamento'
+import AgendamentoManual from '../../components/AgendamentoManual'
 import Loader from '../../components/Loader'
 
 const DURACAO_SLOT_MIN = 60 // horários (livres, vagos e bloqueios) sempre em blocos de 1h
@@ -33,6 +35,8 @@ export default function Agenda() {
   const [mostrarFormBloqueioDia, setMostrarFormBloqueioDia] = useState(false)
   const [motivoSelecionado, setMotivoSelecionado] = useState('nao_especificado')
   const [reagendandoId, setReagendandoId] = useState(null)
+  const [agendandoSlot, setAgendandoSlot] = useState(null)
+  const [cancelandoSerieId, setCancelandoSerieId] = useState(null)
 
   const dataMaxima = useMemo(() => {
     const d = new Date(dataMinima)
@@ -89,6 +93,7 @@ export default function Agenda() {
     setMostrarFormBloqueioDia(false)
     setMotivoSelecionado('nao_especificado')
     setReagendandoId(null)
+    setAgendandoSlot(null)
     setConcluindoEncaixeId(null)
     setEncaixeAberto(false)
   }, [dataSelecionada, barberId])
@@ -101,9 +106,12 @@ export default function Agenda() {
 
   const barbeiroAtual = barbeiros?.find(b => b.id === barberId)
 
+  const expedienteDia = dataSelecionada
+    ? barbeiroAtual?.workingHours?.[dataSelecionada.getDay()]
+    : null
+
   const horariosVagos = useMemo(() => {
     if (!barbeiroAtual || !dataSelecionada) return []
-    const expedienteDia = barbeiroAtual.workingHours?.[dataSelecionada.getDay()]
     return gerarHorariosDisponiveis({
       expedienteDia,
       duracaoServicoMin: DURACAO_SLOT_MIN,
@@ -115,6 +123,7 @@ export default function Agenda() {
   function statusExibido(a) {
     if (a.status === 'bloqueado') return 'bloqueado'
     if (a.status === 'cancelado') return 'cancelado'
+    if (a.status === 'remarcado') return 'remarcado'
     if (jaPassou(a.date, a.endTime)) return 'concluido'
     return 'confirmado'
   }
@@ -147,6 +156,16 @@ export default function Agenda() {
 
   async function desbloquearDia() {
     if (bloqueioDoDia) await removerBloqueioDia(bloqueioDoDia.id)
+  }
+
+  async function cancelarSerie(a) {
+    if (!confirm('Cancelar este e todos os agendamentos futuros dessa série recorrente?')) return
+    setCancelandoSerieId(a.id)
+    try {
+      await cancelarSerieRecorrente(a.recurringId, a.date)
+    } finally {
+      setCancelandoSerieId(null)
+    }
   }
 
   async function concluirEncaixe(id) {
@@ -308,13 +327,69 @@ export default function Agenda() {
             {agendamentos?.map(a => {
               const status = statusExibido(a)
               const wpp = linkWhatsapp(a.clientPhone)
+
+              if (status === 'remarcado') {
+                const horarioLiberado = horariosVagos.find(h => h.startTime === a.startTime)
+                return (
+                  <Fragment key={a.id}>
+                    <div className="card card-remarcado">
+                      <div className="row-between">
+                        <strong>{a.startTime} · {a.clientName}</strong>
+                        <span className="badge badge-remarcado">remarcado</span>
+                      </div>
+                      <div className="barber-meta" style={{ marginTop: 4 }}>
+                        {a.serviceName} · {formatarPreco(a.price)} · {a.clientPhone}
+                      </div>
+                      {a.remarcadoPara && (
+                        <div className="barber-meta" style={{ marginTop: 4 }}>
+                          Remarcado para {diaDaSemana(a.remarcadoPara.date)}, {formatarDataBR(a.remarcadoPara.date)} às {a.remarcadoPara.startTime}
+                        </div>
+                      )}
+                    </div>
+
+                    {horarioLiberado && (
+                      <div className="card">
+                        <div className="row-between">
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14 }}>
+                            {horarioLiberado.startTime} – {horarioLiberado.endTime} · horário liberado
+                          </span>
+                          <button
+                            className={agendandoSlot === horarioLiberado.startTime ? 'btn btn-outline btn-sm' : 'btn btn-primary btn-sm'}
+                            onClick={() => setAgendandoSlot(atual => atual === horarioLiberado.startTime ? null : horarioLiberado.startTime)}
+                          >
+                            {agendandoSlot === horarioLiberado.startTime ? 'Fechar' : 'Agendar'}
+                          </button>
+                        </div>
+
+                        {agendandoSlot === horarioLiberado.startTime && (
+                          <AgendamentoManual
+                            barberId={barberId}
+                            barberName={barbeiroAtual?.name}
+                            dataKey={toDateKey(dataSelecionada)}
+                            slot={horarioLiberado}
+                            expedienteDia={expedienteDia}
+                            agendamentosDoDia={agendamentos || []}
+                            bloqueiosDia={bloqueiosDia}
+                            onConcluido={() => setAgendandoSlot(null)}
+                            onCancelar={() => setAgendandoSlot(null)}
+                          />
+                        )}
+                      </div>
+                    )}
+                  </Fragment>
+                )
+              }
+
               return (
                 <div key={a.id} className={`card ${status === 'concluido' ? 'card-passado' : ''}`}>
                   <div className="row-between">
                     <strong>{a.startTime} · {a.clientName}</strong>
-                    {status !== 'confirmado' && (
-                      <span className={`badge badge-${status}`}>{status}</span>
-                    )}
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {a.recurringId && <span className="badge badge-recorrente">🔁 recorrente</span>}
+                      {status !== 'confirmado' && (
+                        <span className={`badge badge-${status}`}>{status}</span>
+                      )}
+                    </div>
                   </div>
                   {status !== 'bloqueado' && (
                     <div className="barber-meta" style={{ marginTop: 4 }}>
@@ -338,6 +413,15 @@ export default function Agenda() {
                       <button className="btn btn-danger btn-sm" onClick={() => atualizarStatusAgendamento(a.id, 'cancelado')}>
                         Cancelar
                       </button>
+                      {a.recurringId && (
+                        <button
+                          className="btn btn-danger btn-sm"
+                          onClick={() => cancelarSerie(a)}
+                          disabled={cancelandoSerieId === a.id}
+                        >
+                          {cancelandoSerieId === a.id ? 'Cancelando série...' : 'Cancelar série'}
+                        </button>
+                      )}
                     </div>
                   )}
                   {(status === 'confirmado' || status === 'concluido') && reagendandoId === a.id && (
@@ -368,15 +452,39 @@ export default function Agenda() {
 
           <div className="list-gap">
             {horariosVagos.map(h => (
-              <div key={h.startTime} className="card row-between">
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14 }}>{h.startTime} – {h.endTime}</span>
-                <button
-                  className="btn btn-outline btn-sm"
-                  onClick={() => bloquearHorario(h)}
-                  disabled={bloqueando === h.startTime}
-                >
-                  {bloqueando === h.startTime ? 'Bloqueando...' : 'Bloquear'}
-                </button>
+              <div key={h.startTime} className="card">
+                <div className="row-between">
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14 }}>{h.startTime} – {h.endTime}</span>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      className={agendandoSlot === h.startTime ? 'btn btn-outline btn-sm' : 'btn btn-primary btn-sm'}
+                      onClick={() => setAgendandoSlot(atual => atual === h.startTime ? null : h.startTime)}
+                    >
+                      {agendandoSlot === h.startTime ? 'Fechar' : 'Agendar'}
+                    </button>
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={() => bloquearHorario(h)}
+                      disabled={bloqueando === h.startTime}
+                    >
+                      {bloqueando === h.startTime ? 'Bloqueando...' : 'Bloquear'}
+                    </button>
+                  </div>
+                </div>
+
+                {agendandoSlot === h.startTime && (
+                  <AgendamentoManual
+                    barberId={barberId}
+                    barberName={barbeiroAtual?.name}
+                    dataKey={toDateKey(dataSelecionada)}
+                    slot={h}
+                    expedienteDia={expedienteDia}
+                    agendamentosDoDia={agendamentos || []}
+                    bloqueiosDia={bloqueiosDia}
+                    onConcluido={() => setAgendandoSlot(null)}
+                    onCancelar={() => setAgendandoSlot(null)}
+                  />
+                )}
               </div>
             ))}
           </div>

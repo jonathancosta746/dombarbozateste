@@ -46,6 +46,14 @@ service cloud.firestore {
         && resource.data.barberId == request.auth.uid;
     }
 
+    match /clients/{clientId} {
+      allow read: if true;
+      // Qualquer cliente (sem login) pode registrar/editar o nome atrelado
+      // ao seu telefone; o barbeiro também grava isso ao criar um agendamento.
+      allow create, update: if true;
+      allow delete: if isAdmin();
+    }
+
     match /fitInRequests/{requestId} {
       allow read: if true;
       // Qualquer cliente (sem login) pode criar um pedido de encaixe.
